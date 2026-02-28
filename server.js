@@ -1,94 +1,127 @@
 // ============================================================
-//  CopyTrader Relay Server  — Node.js + Express
-//  Free hosting: Railway.app / Render.com / Fly.io
-//  
-//  Install: npm install express
-//  Run:     node server.js
-//  Deploy:  Push to Railway/Render — FREE!
+//  CopyTrader Relay Server  v2.0
+//  Client API Keys with Names
+//  Deploy: Railway.app (FREE)
+//
+//  New client add cheyyadaniki:
+//  CLIENTS lo oka line add cheyyi → GitHub push → Done!
+//  Format: "APIKEY": "ClientName"
 // ============================================================
 
 const express = require('express');
 const app     = express();
-
 app.use(express.json());
 
-// In-memory store (per MasterID)
-// { "MASTER_01": { equity, balance, time, trades: [...] } }
+// ============================================================
+//  👇 CLIENTS — Add / Remove clients here!
+// ============================================================
+const CLIENTS = {
+  "JEEVAN123":  "Jeevan",
+  "RAVI123":    "Ravi",
+  "SURESH123":  "Suresh",
+  "PRIYA123":   "Priya",
+  // New client add cheyyadaniki:
+  // "CLIENTNAME123": "ClientName",
+};
+// ============================================================
+
+// In-memory store
 const store = {};
 
-// ── Security middleware ──────────────────────────────────────
-const VALID_KEYS = ["secret123"]; // EA lo ApiKey tho same!
-                                   // Multiple slaves aithe same key share cheyachu
+// ── Auth middleware ──────────────────────────────────────────
+function getClient(key) {
+  return CLIENTS[key] || null;
+}
 
 function checkKey(req, res, next) {
-  const key = req.query.key;
-  if (!key || !VALID_KEYS.includes(key)) {
+  const key    = req.query.key;
+  const client = getClient(key);
+  if (!client) {
+    console.log(`❌ Invalid key: ${key}`);
     return res.status(401).json({ error: "Invalid API key" });
   }
+  req.clientName = client;
+  req.clientKey  = key;
   next();
 }
 
 // ── MASTER → POST /push ──────────────────────────────────────
-// Master trades ikkadi POST chestadu
 app.post('/push', checkKey, (req, res) => {
-  const id = req.query.id;
+  const id     = req.query.id;
+  const client = req.clientName;
   if (!id) return res.status(400).json({ error: "Missing id" });
 
   const data = req.body;
-  if (!data || typeof data !== 'object') 
-    return res.status(400).json({ error: "Invalid JSON body" });
+  if (!data) return res.status(400).json({ error: "Invalid body" });
 
   store[id] = {
-    equity:  data.equity  || 0,
-    balance: data.balance || 0,
-    time:    data.time    || Math.floor(Date.now()/1000),
-    trades:  data.trades  || []
+    equity:     data.equity  || 0,
+    balance:    data.balance || 0,
+    time:       data.time    || Math.floor(Date.now()/1000),
+    trades:     data.trades  || [],
+    clientName: client,
+    clientKey:  req.clientKey
   };
 
-  const tradeCount = store[id].trades.length;
-  console.log(`[PUSH] ID=${id} | Trades=${tradeCount} | Equity=${data.equity}`);
-  res.json({ ok: true, received: tradeCount });
+  const count = store[id].trades.length;
+  console.log(`[PUSH] Client=${client} | ID=${id} | Trades=${count} | Equity=${data.equity}`);
+  res.json({ ok: true, client: client, received: count });
 });
 
 // ── SLAVE → GET /pull ────────────────────────────────────────
-// Slave ikkad GET chesukuntadu
 app.get('/pull', checkKey, (req, res) => {
-  const id = req.query.id;
+  const id     = req.query.id;
+  const client = req.clientName;
   if (!id) return res.status(400).json({ error: "Missing id" });
 
   const data = store[id];
+
+  // Security: slave key must match master key
+  if (data && data.clientKey !== req.clientKey) {
+    console.log(`❌ Key mismatch! Client=${client} tried ID=${id}`);
+    return res.status(403).json({ error: "Key mismatch for this Master ID" });
+  }
+
   if (!data) {
-    // Master inka push cheyyadhu — empty return
     return res.json({ equity: 0, balance: 0, time: 0, trades: [] });
   }
 
-  console.log(`[PULL] ID=${id} | Trades=${data.trades.length}`);
+  console.log(`[PULL] Client=${client} | ID=${id} | Trades=${data.trades.length}`);
   res.json(data);
 });
 
-// ── Status page ──────────────────────────────────────────────
+// ── Status Dashboard ─────────────────────────────────────────
 app.get('/', (req, res) => {
-  const status = {};
+  const masters = {};
+  const now     = Math.floor(Date.now()/1000);
+
   for (const [id, data] of Object.entries(store)) {
-    const age = Math.floor(Date.now()/1000) - data.time;
-    status[id] = {
+    const age = now - data.time;
+    masters[id] = {
+      client:      data.clientName,
       trades:      data.trades.length,
       equity:      data.equity,
+      balance:     data.balance,
       last_update: `${age}s ago`,
-      online:      age < 30
+      status:      age < 30 ? "🟢 ONLINE" : "🔴 OFFLINE"
     };
   }
+
   res.json({
-    server:  "CopyTrader Relay v1.0",
-    masters: status,
-    uptime:  `${Math.floor(process.uptime())}s`
+    server:        "CopyTrader Relay v2.0",
+    total_masters: Object.keys(masters).length,
+    total_clients: Object.keys(CLIENTS).length,
+    masters:       masters,
+    uptime:        `${Math.floor(process.uptime())}s`
   });
 });
 
 // ── Start ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ CopyTrader Server running on port ${PORT}`);
-  console.log(`   Push: POST /push?id=MASTER_01&key=secret123`);
-  console.log(`   Pull: GET  /pull?id=MASTER_01&key=secret123`);
+  console.log(`✅ CopyTrader Server v2.0 on port ${PORT}`);
+  console.log(`👥 Registered clients: ${Object.keys(CLIENTS).length}`);
+  Object.entries(CLIENTS).forEach(([key, name]) => {
+    console.log(`   → ${name} | Key: ${key}`);
+  });
 });
